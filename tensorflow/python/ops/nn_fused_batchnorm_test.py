@@ -22,6 +22,7 @@ import numpy as np
 
 from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
+from tensorflow.python.framework import test_util
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import gradient_checker
 from tensorflow.python.ops import gradients_impl
@@ -50,7 +51,7 @@ class BatchNormalizationTest(test.TestCase):
     y = self._batch_norm(x, mean, var, offset, scale, epsilon)
     if data_format == 'NCHW':
       y = array_ops.transpose(y, [0, 3, 1, 2])
-    return y.eval()
+    return self.evaluate(y)
 
   def _test_inference(self,
                       x_shape,
@@ -66,7 +67,7 @@ class BatchNormalizationTest(test.TestCase):
     mean_val = np.random.random_sample(scale_shape).astype(scale_dtype)
     var_val = np.random.random_sample(scale_shape).astype(scale_dtype)
 
-    with self.test_session(use_gpu=use_gpu) as sess:
+    with self.cached_session(use_gpu=use_gpu) as sess:
       x = constant_op.constant(x_val, name='x')
       scale = constant_op.constant(scale_val, name='scale')
       offset = constant_op.constant(offset_val, name='offset')
@@ -82,7 +83,7 @@ class BatchNormalizationTest(test.TestCase):
           epsilon=epsilon,
           data_format=data_format,
           is_training=False)
-      y_val = sess.run(y)
+      y_val = self.evaluate(y)
       y_ref = self._inference_ref(x, scale, offset, mean, var, epsilon,
                                   data_format)
     # An atol value of 1e-3 is too small for float16's, because some adjacent
@@ -102,7 +103,7 @@ class BatchNormalizationTest(test.TestCase):
     y = self._batch_norm(x, mean, var, offset, scale, epsilon)
     if data_format == 'NCHW':
       y = array_ops.transpose(y, [0, 3, 1, 2])
-    return y.eval(), mean.eval(), var.eval()
+    return self.evaluate(y), self.evaluate(mean), self.evaluate(var)
 
   def _test_training(self,
                      x_shape,
@@ -115,7 +116,7 @@ class BatchNormalizationTest(test.TestCase):
     x_val = np.random.random_sample(x_shape).astype(x_dtype)
     scale_val = np.random.random_sample(scale_shape).astype(scale_dtype)
     offset_val = np.random.random_sample(scale_shape).astype(scale_dtype)
-    with self.test_session(use_gpu=use_gpu) as sess:
+    with self.cached_session(use_gpu=use_gpu) as sess:
       x = constant_op.constant(x_val, name='x')
       scale = constant_op.constant(scale_val, name='scale')
       offset = constant_op.constant(offset_val, name='offset')
@@ -127,7 +128,7 @@ class BatchNormalizationTest(test.TestCase):
           epsilon=epsilon,
           data_format=data_format,
           is_training=True)
-      y_val, mean_val, var_val = sess.run([y, mean, var])
+      y_val, mean_val, var_val = self.evaluate([y, mean, var])
       y_ref, mean_ref, var_ref = self._training_ref(x, scale, offset, epsilon,
                                                     data_format)
     y_atol = 2e-3 if x_dtype == np.float16 else 1e-3
@@ -171,6 +172,10 @@ class BatchNormalizationTest(test.TestCase):
         x, x_shape, y, y_shape, delta=1e-3, x_init_value=x_init_val)
     _, numerical_grad = gradient_checker.compute_gradient(
         x32, x_shape, y32, y_shape, delta=1e-3, x_init_value=x32_init_val)
+
+    # If grad is empty, no error.
+    if theoretical_grad.size == 0 and numerical_grad.size == 0:
+      return 0
     return np.fabs(theoretical_grad - numerical_grad).max()
 
   def _test_gradient(self,
@@ -186,7 +191,7 @@ class BatchNormalizationTest(test.TestCase):
     scale_val = np.random.random_sample(scale_shape).astype(scale_dtype)
     offset_val = np.random.random_sample(scale_shape).astype(scale_dtype)
 
-    with self.test_session(use_gpu=use_gpu):
+    with self.cached_session(use_gpu=use_gpu):
       x = constant_op.constant(x_val, name='x')
       scale = constant_op.constant(scale_val, name='scale')
       offset = constant_op.constant(offset_val, name='offset')
@@ -248,7 +253,7 @@ class BatchNormalizationTest(test.TestCase):
     scale_val = np.random.random_sample(scale_shape).astype(scale_dtype)
     offset_val = np.random.random_sample(scale_shape).astype(scale_dtype)
 
-    with self.test_session(use_gpu=use_gpu) as sess:
+    with self.cached_session(use_gpu=use_gpu) as sess:
       x = constant_op.constant(x_val, name='x')
       grad_y = constant_op.constant(grad_y_val, name='grad_y')
       scale = constant_op.constant(scale_val, name='scale')
@@ -273,9 +278,10 @@ class BatchNormalizationTest(test.TestCase):
       if is_training:
         epsilon = y.op.get_attr('epsilon')
         data_format = y.op.get_attr('data_format')
-        grad_vals = sess.run([grad_x, grad_scale, grad_offset])
-        grad_internal = nn_grad._BatchNormGrad(grad_y, x, scale, pop_mean, pop_var, epsilon, data_format)
-        grad_internal_vals = sess.run(list(grad_internal))
+        grad_vals = self.evaluate([grad_x, grad_scale, grad_offset])
+        grad_internal = nn_grad._BatchNormGrad(grad_y, x, scale, pop_mean,
+                                               pop_var, epsilon, data_format)
+        grad_internal_vals = self.evaluate(list(grad_internal))
         for grad_val, grad_internal_val in zip(grad_vals, grad_internal_vals):
           self.assertAllClose(grad_val, grad_internal_val, atol=err_tolerance)
 
@@ -333,7 +339,7 @@ class BatchNormalizationTest(test.TestCase):
     self.assertLess(err_grad_x_2, err_tolerance)
     self.assertLess(err_grad_scale, err_tolerance)
 
-  def testInference(self):
+  def testInferenceShape1(self):
     x_shape = [1, 1, 6, 1]
     for dtype in [np.float16, np.float32]:
       if test.is_gpu_available(cuda_only=True):
@@ -344,6 +350,7 @@ class BatchNormalizationTest(test.TestCase):
       self._test_inference(
           x_shape, dtype, [1], np.float32, use_gpu=False, data_format='NHWC')
 
+  def testInferenceShape2(self):
     x_shape = [1, 1, 6, 2]
     if test.is_gpu_available(cuda_only=True):
       for dtype in [np.float16, np.float32]:
@@ -352,12 +359,14 @@ class BatchNormalizationTest(test.TestCase):
         self._test_inference(
             x_shape, dtype, [2], np.float32, use_gpu=False, data_format='NHWC')
 
+  def testInferenceShape3(self):
     x_shape = [1, 2, 1, 6]
     if test.is_gpu_available(cuda_only=True):
       for dtype in [np.float16, np.float32]:
         self._test_inference(
             x_shape, dtype, [2], np.float32, use_gpu=True, data_format='NCHW')
 
+  def testInferenceShape4(self):
     x_shape = [27, 131, 127, 6]
     for dtype in [np.float16, np.float32]:
       if test.is_gpu_available(cuda_only=True):
@@ -368,7 +377,18 @@ class BatchNormalizationTest(test.TestCase):
       self._test_inference(
           x_shape, dtype, [6], np.float32, use_gpu=False, data_format='NHWC')
 
-  def testTraining(self):
+  def testInferenceShape5(self):
+    x_shape = [0, 131, 127, 6]
+    for dtype in [np.float16, np.float32]:
+      if test.is_gpu_available(cuda_only=True):
+        self._test_inference(
+            x_shape, dtype, [131], np.float32, use_gpu=True, data_format='NCHW')
+        self._test_inference(
+            x_shape, dtype, [6], np.float32, use_gpu=True, data_format='NHWC')
+      self._test_inference(
+          x_shape, dtype, [6], np.float32, use_gpu=False, data_format='NHWC')
+
+  def testTrainingShape1(self):
     x_shape = [1, 1, 6, 1]
     for dtype in [np.float16, np.float32]:
       if test.is_gpu_available(cuda_only=True):
@@ -379,6 +399,7 @@ class BatchNormalizationTest(test.TestCase):
       self._test_training(
           x_shape, dtype, [1], np.float32, use_gpu=False, data_format='NHWC')
 
+  def testTrainingShape2(self):
     x_shape = [1, 1, 6, 2]
     for dtype in [np.float16, np.float32]:
       if test.is_gpu_available(cuda_only=True):
@@ -387,12 +408,14 @@ class BatchNormalizationTest(test.TestCase):
       self._test_training(
           x_shape, dtype, [2], np.float32, use_gpu=False, data_format='NHWC')
 
+  def testTrainingShape3(self):
     x_shape = [1, 2, 1, 6]
     if test.is_gpu_available(cuda_only=True):
       for dtype in [np.float16, np.float32]:
         self._test_training(
             x_shape, dtype, [2], np.float32, use_gpu=True, data_format='NCHW')
 
+  def testTrainingShape4(self):
     x_shape = [27, 131, 127, 6]
     for dtype in [np.float16, np.float32]:
       if test.is_gpu_available(cuda_only=True):
@@ -403,7 +426,19 @@ class BatchNormalizationTest(test.TestCase):
       self._test_training(
           x_shape, dtype, [6], np.float32, use_gpu=False, data_format='NHWC')
 
-  def testBatchNormGrad(self):
+  def testTrainingShape5(self):
+    x_shape = [0, 131, 127, 6]
+    for dtype in [np.float16, np.float32]:
+      if test.is_gpu_available(cuda_only=True):
+        self._test_training(
+            x_shape, dtype, [131], np.float32, use_gpu=True, data_format='NCHW')
+        self._test_training(
+            x_shape, dtype, [6], np.float32, use_gpu=True, data_format='NHWC')
+      self._test_training(
+          x_shape, dtype, [6], np.float32, use_gpu=False, data_format='NHWC')
+
+  @test_util.run_deprecated_v1
+  def testBatchNormGradShape1(self):
     for is_training in [True, False]:
       x_shape = [1, 1, 6, 1]
       for dtype in [np.float16, np.float32]:
@@ -430,6 +465,9 @@ class BatchNormalizationTest(test.TestCase):
             data_format='NHWC',
             is_training=is_training)
 
+  @test_util.run_deprecated_v1
+  def testBatchNormGradShape2(self):
+    for is_training in [True, False]:
       x_shape = [1, 1, 6, 2]
       for dtype in [np.float16, np.float32]:
         if test.is_gpu_available(cuda_only=True):
@@ -448,6 +486,9 @@ class BatchNormalizationTest(test.TestCase):
             data_format='NHWC',
             is_training=is_training)
 
+  @test_util.run_deprecated_v1
+  def testBatchNormGradShape3(self):
+    for is_training in [True, False]:
       x_shape = [1, 2, 1, 6]
       if test.is_gpu_available(cuda_only=True):
         for dtype in [np.float16, np.float32]:
@@ -459,7 +500,39 @@ class BatchNormalizationTest(test.TestCase):
               data_format='NCHW',
               is_training=is_training)
 
+  @test_util.run_deprecated_v1
+  def testBatchNormGradShape4(self):
+    for is_training in [True, False]:
       x_shape = [5, 7, 11, 4]
+      for dtype in [np.float16, np.float32]:
+        if test.is_gpu_available(cuda_only=True):
+          self._test_gradient(
+              x_shape,
+              dtype, [7],
+              np.float32,
+              use_gpu=True,
+              data_format='NCHW',
+              is_training=is_training)
+          self._test_gradient(
+              x_shape,
+              dtype, [4],
+              np.float32,
+              use_gpu=True,
+              data_format='NHWC',
+              is_training=is_training)
+        self._test_gradient(
+            x_shape,
+            dtype, [4],
+            np.float32,
+            use_gpu=False,
+            data_format='NHWC',
+            is_training=is_training)
+
+  @test_util.run_deprecated_v1
+  @test_util.disable_xla('This test never passed for XLA')
+  def testBatchNormGradShape5(self):
+    for is_training in [True, False]:
+      x_shape = [0, 7, 11, 4]
       for dtype in [np.float16, np.float32]:
         if test.is_gpu_available(cuda_only=True):
           self._test_gradient(
@@ -515,26 +588,41 @@ class BatchNormalizationTest(test.TestCase):
           is_training=is_training,
           err_tolerance=err_tolerance)
 
-  def testBatchNormGradGrad(self):
-    configs = [{
+  @test_util.run_deprecated_v1
+  def testBatchNormGradGradConfig1(self):
+    config = {
         'shape': [2, 3, 4, 5],
         'err_tolerance': 1e-2,
         'dtype': np.float32,
-    }, {
+    }
+    self._testBatchNormGradGrad(config)
+
+  @test_util.run_deprecated_v1
+  def testBatchNormGradGradConfig2(self):
+    config = {
         'shape': [2, 3, 2, 2],
         'err_tolerance': 1e-3,
         'dtype': np.float32,
-    }, {
+    }
+    self._testBatchNormGradGrad(config)
+
+  @test_util.run_deprecated_v1
+  def testBatchNormGradGradConfig3(self):
+    config = {
         'shape': [2, 3, 4, 5],
         'err_tolerance': 1e-2,
         'dtype': np.float16,
-    }, {
+    }
+    self._testBatchNormGradGrad(config)
+
+  @test_util.run_deprecated_v1
+  def testBatchNormGradGradConfig4(self):
+    config = {
         'shape': [2, 3, 2, 2],
         'err_tolerance': 2e-3,
         'dtype': np.float16,
-    }]
-    for config in configs:
-      self._testBatchNormGradGrad(config)
+    }
+    self._testBatchNormGradGrad(config)
 
 
 if __name__ == '__main__':

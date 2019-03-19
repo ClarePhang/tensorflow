@@ -64,7 +64,9 @@ class TopK : public OpKernel {
                 errors::InvalidArgument("input must be >= 1-D, got shape ",
                                         input_in.shape().DebugString()));
     OP_REQUIRES(context, input_in.dim_size(input_in.dims() - 1) >= k,
-                errors::InvalidArgument("input must have at least k columns"));
+                errors::InvalidArgument(
+                    "input must have at least k columns. Had ",
+                    input_in.dim_size(input_in.dims() - 1), ", needed ", k));
 
     const auto& input = input_in.flat_inner_dims<T>();
 
@@ -80,8 +82,8 @@ class TopK : public OpKernel {
     OP_REQUIRES_OK(context,
                    context->allocate_output(1, output_shape, &indices_out));
 
-    // Nothing to do for top-nothing.
-    if (k == 0) return;
+    // Nothing to do for top-nothing or over nothing.
+    if (k == 0 || num_rows == 0) return;
 
     auto values = values_out->flat_inner_dims<T>();
     auto indices = indices_out->flat_inner_dims<int32>();

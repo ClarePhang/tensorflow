@@ -20,6 +20,7 @@ from __future__ import print_function
 
 import numpy as np
 
+from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import histogram_ops
@@ -40,6 +41,7 @@ class DiscreteScalarDistributionTestHelpers(object):
   def run_test_sample_consistent_log_prob(
       self, sess_run_fn, dist,
       num_samples=int(1e5), num_threshold=int(1e3), seed=42,
+      batch_size=None,
       rtol=1e-2, atol=0.):
     """Tests that sample/log_prob are consistent with each other.
 
@@ -66,6 +68,8 @@ class DiscreteScalarDistributionTestHelpers(object):
       seed: Python `int` indicating the seed to use when sampling from `dist`.
         In general it is not recommended to use `None` during a test as this
         increases the likelihood of spurious test failure.
+      batch_size: Hint for unpacking result of samples. Default: `None` means
+        batch_size is inferred.
       rtol: Python `float`-type indicating the admissible relative error between
         analytical and sample statistics.
       atol: Python `float`-type indicating the admissible absolute error between
@@ -80,10 +84,11 @@ class DiscreteScalarDistributionTestHelpers(object):
     # Histogram only supports vectors so we call it once per batch coordinate.
     y = dist.sample(num_samples, seed=seed)
     y = array_ops.reshape(y, shape=[num_samples, -1])
-    batch_size = math_ops.reduce_prod(dist.batch_shape_tensor())
+    if batch_size is None:
+      batch_size = math_ops.reduce_prod(dist.batch_shape_tensor())
     batch_dims = array_ops.shape(dist.batch_shape_tensor())[0]
     edges_expanded_shape = 1 + array_ops.pad([-2], paddings=[[0, batch_dims]])
-    for b, x in enumerate(array_ops.unstack(y, axis=1)):
+    for b, x in enumerate(array_ops.unstack(y, num=batch_size, axis=1)):
       counts, edges = self.histogram(x)
       edges = array_ops.reshape(edges, edges_expanded_shape)
       probs = math_ops.exp(dist.log_prob(edges))
@@ -121,7 +126,7 @@ class DiscreteScalarDistributionTestHelpers(object):
       atol: Python `float`-type indicating the admissible absolute error between
         analytical and sample statistics.
     """
-    x = math_ops.to_float(dist.sample(num_samples, seed=seed))
+    x = math_ops.cast(dist.sample(num_samples, seed=seed), dtypes.float32)
     sample_mean = math_ops.reduce_mean(x, axis=0)
     sample_variance = math_ops.reduce_mean(
         math_ops.square(x - sample_mean), axis=0)
@@ -176,7 +181,7 @@ class DiscreteScalarDistributionTestHelpers(object):
       lo = value_range[0]
       hi = value_range[1]
       if nbins is None:
-        nbins = math_ops.to_int32(hi - lo)
+        nbins = math_ops.cast(hi - lo, dtypes.int32)
       delta = (hi - lo) / math_ops.cast(
           nbins, dtype=value_range.dtype.base_dtype)
       edges = math_ops.range(
@@ -323,7 +328,7 @@ class VectorDistributionTestHelpers(object):
       num_samples=int(1e5),
       seed=24,
       rtol=1e-2,
-      atol=0.,
+      atol=0.1,
       cov_rtol=None,
       cov_atol=None):
     """Tests that sample/mean/covariance are consistent with each other.

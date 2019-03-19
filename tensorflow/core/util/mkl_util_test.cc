@@ -22,7 +22,7 @@ limitations under the License.
 namespace tensorflow {
 namespace {
 
-#ifdef INTEL_MKL_DNN
+#ifndef INTEL_MKL_ML_ONLY
 
 TEST(MklUtilTest, MklDnnTfShape) {
   auto cpu_engine = engine(engine::cpu, 0);
@@ -54,7 +54,6 @@ TEST(MklUtilTest, MklDnnTfShape) {
   EXPECT_NE(b_tf_shape_nchw, b_mkldnn_tf_shape);
 }
 
-
 TEST(MklUtilTest, MklDnnBlockedFormatTest) {
   // Let's create 2D tensor of shape {3, 4} with 3 being innermost dimension
   // first (case 1) and then it being outermost dimension (case 2).
@@ -85,7 +84,41 @@ TEST(MklUtilTest, MklDnnBlockedFormatTest) {
   EXPECT_EQ(b_md2.data.format, mkldnn_blocked);
 }
 
-#endif  // INTEL_MKL_DNN
+TEST(MklUtilTest, LRUCacheTest) {
+  // The cached objects are of type int*
+  size_t capacity = 100;
+  size_t num_objects = capacity + 10;
+  LRUCache<int> lru_cache(capacity);
+
+  // Test SetOp: be able to set more ops than the capacity
+  for (int k = 0; k < num_objects; k++) {
+    lru_cache.SetOp(std::to_string(k), new int(k));
+  }
+
+  // Test GetOp and capacity:
+  // Least recently accessed objects should not be in cache any more.
+  for (int k = 0; k < num_objects - capacity; ++k) {
+    EXPECT_EQ(nullptr, lru_cache.GetOp(std::to_string(k)));
+  }
+
+  // Test GetOp and capacity:
+  // Most recently accessed objects should still be in cache.
+  for (int k = num_objects - capacity; k < num_objects; ++k) {
+    int* int_ptr = lru_cache.GetOp(std::to_string(k));
+    EXPECT_NE(nullptr, int_ptr);
+    EXPECT_EQ(*int_ptr, k);
+  }
+
+  // Clean up the cache
+  lru_cache.Clear();
+
+  // After clean up, there should be no cached object.
+  for (int k = 0; k < num_objects; ++k) {
+    EXPECT_EQ(nullptr, lru_cache.GetOp(std::to_string(k)));
+  }
+}
+
+#endif  // INTEL_MKL_ML_ONLY
 }  // namespace
 }  // namespace tensorflow
 
